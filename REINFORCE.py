@@ -3,11 +3,12 @@ import numpy as np
 import gymnasium as gym
 import matplotlib.pyplot as plt
 from torch import nn
+from torch.utils.tensorboard import SummaryWriter
 
 # Hyperparameters
 MAX_STEP = 500
 BATCH_SIZE = 4
-ROLLOUTS = 10 
+ROLLOUTS = 1
 
 # This is a Mac implementation
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -32,14 +33,16 @@ class Agent(nn.Module):
         return probs, action 
 
 def make_env():
-    env = gym.make("CartPole-v1") 
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    return env
+    def thunk():
+        env = gym.make("CartPole-v1") 
+        env = gym.wrappers.RecordEpisodeStatistics(env) 
+        return env
+    return thunk
 
 if __name__ == "__main__":
 
     # Setup up environment
-    envs = gym.vector.SyncVectorEnv([make_env for _ in range(BATCH_SIZE)])
+    envs = gym.vector.SyncVectorEnv([make_env() for _ in range(BATCH_SIZE)])
     
     # Create agent
     agent = Agent().to(device)
@@ -55,8 +58,10 @@ if __name__ == "__main__":
 
         dones = np.zeros(BATCH_SIZE) 
 
-        while not np.all(dones) and steps < MAX_STEP:
+        for step in range(MAX_STEP):
             steps += 1
+            # print(f"S: {dones}")
+            print(f"Info: {info}")
 
             next_obs = torch.tensor(next_obs, dtype=torch.float32).to(device)
 
@@ -76,18 +81,3 @@ if __name__ == "__main__":
                         returns_per_env[env_idx].append(episode_return)
                         
     envs.close()
-
-    print(returns_per_env)
-    # Print results
-    plt.figure(figsize=(10, 6))
-
-    # Plot each environment's returns
-    for env_idx, env_returns in enumerate(returns_per_env):
-        plt.plot(env_returns, label=f'Env {env_idx+1}')
-
-    plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
-    plt.legend()
-    plt.title("Rewards per Environment")
-    plt.grid(True, alpha=0.3)
-    plt.show()
