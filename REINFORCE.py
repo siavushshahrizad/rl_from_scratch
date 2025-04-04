@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from torch import nn
 
 # Hyperparameters
+MAX_STEP = 200
+BATCH_SIZE = 4
 ROLLOUTS = 200
 
 # This is a Mac implementation
@@ -21,43 +23,61 @@ class Agent(nn.Module):
             nn.Linear(128, 2)
         )
 
-    def forward(self, state, deterministic=True):
+    def forward(self, state):
         logits = self.linear_relu_stack(state)
-        if deterministic:
-            action = int(torch.argmax(logits))
-        return logits, action 
+        probs = self.sfmax(logits)
+        action = torch.argmax(probs, dim=-1)
+        return probs, action 
 
+    def sfmax(self, logits):
+        numerator = torch.exp(logits)
+        denominator = torch.sum(numerator, dim=-1, keepdim=True)      # Makes sure that probability scores are calculated for left and right per sample in batch 
+        probs = numerator / denominator
+        return probs
+
+def make_env():
+    return gym.make("CartPole-v1")
 
 if __name__ == "__main__":
 
     # Setup up environment
-    env = gym.make("CartPole-v1") 
+    envs = gym.vector.SyncVectorEnv([make_env for _ in range(BATCH_SIZE)])
     
     # Create agent
     agent = Agent().to(device)
 
     # Storage
-    rollout_rewards = np.zeros(ROLLOUTS)
+    rollout_rewards = torch.zeros((ROLLOUTS, BATCH_SIZE)).to(device)
 
     for rollout in range(ROLLOUTS):
         
         # Reset at beginning of rollouts
-        total_reward = 0
-        next_obs, info = env.reset()
+        total_reward = torch.zeros(BATCH_SIZE).to(device)
+        next_obs, info = envs.reset()
+        next_obs = torch.Tensor(next_obs).to(device)
+        steps = 0
 
-        done = False
-        while not done:
+        dones = np.zeros(BATCH_SIZE) 
+
+        print("loop about to run")
+        while not np.all(dones) or steps < MAX_STEP:
+            steps += 1
+            obs_tensor = torch.Tensor(next_obs).to(device)
             with torch.no_grad():
-                obs_tensor = torch.FloatTensor(next_obs).to(device)
                 logits, action = agent(obs_tensor)
-
-            next_obs, reward, terminated, truncated, info = env.step(action)
-            total_reward += reward
-            done = terminated or truncated
-
+            
+            action_numpy = action.cpu().numpy()
+            next_obs, reward, terminated, truncated, info = envs.step(action_numpy)
+        
+            dones = np.logical_or(terminated, truncated)
+            masks = 1 - dones
+            masks = torch.tensor(masks, dtype=torch.float32).to(device)
+            total_reward += torch.tensor(reward, dtype=torch.float32).to(device) * masks
+            
+        print("loop done")
         rollout_rewards[rollout] = total_reward
 
-    env.close()
+    envs.close()
     
     # Print results
     plt.plot(rollout_rewards) 
