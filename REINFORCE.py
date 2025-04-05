@@ -2,8 +2,10 @@ import torch
 import numpy as np
 import gymnasium as gym
 import matplotlib.pyplot as plt
+import time
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
+
 
 # Hyperparameters
 MAX_STEP = 500
@@ -41,6 +43,11 @@ def make_env():
 
 if __name__ == "__main__":
 
+    # Track outcomes with Tensorboard
+    timestamp = time.time()
+    writer = SummaryWriter(f"runs/cartpole_{timestamp}")            # Needed for loging reward per episodce in Tensorboard
+    global_step = 0
+
     # Setup up environment
     envs = gym.vector.SyncVectorEnv([make_env() for _ in range(BATCH_SIZE)])
     
@@ -54,14 +61,11 @@ if __name__ == "__main__":
         
         # Reset at beginning of rollouts
         next_obs, info = envs.reset()
-        steps = 0
 
         dones = np.zeros(BATCH_SIZE) 
 
         for step in range(MAX_STEP):
-            steps += 1
-            # print(f"S: {dones}")
-            print(f"Info: {info}")
+            global_step += BATCH_SIZE
 
             next_obs = torch.tensor(next_obs, dtype=torch.float32).to(device)
 
@@ -73,11 +77,10 @@ if __name__ == "__main__":
         
             dones = np.logical_or(terminated, truncated) 
 
-            if "final_info" in info:
-                print("Is running")
-                for env_idx, env_info in enumerate(info["final_info"]):
-                    if env_info is not None and "episode" in env_info:
-                        episode_return = env_info["episode"]["r"]
-                        returns_per_env[env_idx].append(episode_return)
-                        
+            if "episode" in info:                           # The info object seems unique to each in environment and seems to differ between people's code. So need to check if this works
+                returns = info["episode"]["r"] 
+                for env_idx, env_return in enumerate(returns):
+                    writer.add_scalar(f"charts/env_{env_idx}/episodic_return", env_return, global_step)         # This logs to Tensorboard; need to run server; and visit localhost to see results
+
     envs.close()
+    writer.close()
