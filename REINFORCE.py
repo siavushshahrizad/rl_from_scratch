@@ -12,7 +12,7 @@ from torch.distributions import Categorical
 # Hyperparameters
 MAX_STEP = 500
 BATCH_SIZE = 4
-ROLLOUTS = 3
+ROLLOUTS = 4 
 GAMMA = 0.99
 ALPHA = 1e-3
 
@@ -59,9 +59,10 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(agent.parameters(), lr=ALPHA)    
 
     # Storage
+    obs = torch.zeros((MAX_STEP, BATCH_SIZE) + envs.single_observation_space.shape).to(device)
     dones = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)      # Should this even be set up here?
     rewards = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)
-    logprobs = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)
+    logprobs = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)   # Not needed for REINFORCE, only PPO
 
     for rollout in range(ROLLOUTS):
         
@@ -76,11 +77,12 @@ if __name__ == "__main__":
 
         for step in range(MAX_STEP):
             global_step += BATCH_SIZE
+            obs[step] = next_obs
             dones[step] = next_done
 
-            with torch.no_grad():
-                logprob, action = agent(next_obs)
-            logprobs[step] = logprob
+            # with torch.no_grad():
+            logprob, action = agent(next_obs)
+            logprobs[step] = logprob                            # Only for PPO; breaks computational graph
 
             action_numpy = action.cpu().numpy()
             next_obs, reward, terminated, truncated, info = envs.step(action_numpy)
@@ -103,6 +105,9 @@ if __name__ == "__main__":
 
         for step in reversed(range(MAX_STEP)):
             discounted_return = rewards[step] + GAMMA * discounted_return * (1 - dones[step])
+            # state_at_this_step = obs[step]
+            # recomputed_log, _ = agent(state_at_this_step)
+            # loss += -recomputed_log * discounted_return
             loss += -logprobs[step] * discounted_return
         optimizer.zero_grad()
         loss = loss.mean()
