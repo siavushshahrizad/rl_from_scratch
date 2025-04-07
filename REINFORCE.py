@@ -1,3 +1,15 @@
+# I tried in this implementation to follow the PPO example of recomputing log probs.
+# But this seems to have broken the computational graph in a way I don't understand.
+# I need to figure out what exactly the computational graph does. And why storing in 
+# a preconfigured tensor might be breaking it. For this implementation I used just an
+# array to store logprobs. It seems this must introduce inefficiencies. Additionally,
+# this algorithm needs plus 10k steps before it starts improving. Also, the loss goes
+# up, which indicates learning, as the log-prob seems to get multiplied by ever 
+# increasing retunrs.
+# TODO: Check what is happening to entropy
+# TODO: Investigate the graph issue
+
+
 import torch
 import numpy as np
 import gymnasium as gym
@@ -12,7 +24,7 @@ from torch.distributions import Categorical
 # Hyperparameters
 MAX_STEP = 500
 BATCH_SIZE = 4
-ROLLOUTS = 4 
+ROLLOUTS = 40
 GAMMA = 0.99
 ALPHA = 1e-3
 
@@ -62,7 +74,8 @@ if __name__ == "__main__":
     obs = torch.zeros((MAX_STEP, BATCH_SIZE) + envs.single_observation_space.shape).to(device)
     dones = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)      # Should this even be set up here?
     rewards = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)
-    logprobs = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)   # Not needed for REINFORCE, only PPO
+    # logprobs = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)   # Not needed for REINFORCE, only PPO
+    logprobs = []
 
     for rollout in range(ROLLOUTS):
         
@@ -82,7 +95,8 @@ if __name__ == "__main__":
 
             # with torch.no_grad():
             logprob, action = agent(next_obs)
-            logprobs[step] = logprob                            # Only for PPO; breaks computational graph
+            # logprobs[step] = logprob                            # Only for PPO; breaks computational graph
+            logprobs.append(logprob)
 
             action_numpy = action.cpu().numpy()
             next_obs, reward, terminated, truncated, info = envs.step(action_numpy)
@@ -113,6 +127,10 @@ if __name__ == "__main__":
         loss = loss.mean()
         loss.backward()
         optimizer.step()
+
+        # Log loss
+        writer.add_scalar("losses/policy_loss", loss.item(), global_step)
+        logprobs = []
 
     envs.close()
     writer.close()
