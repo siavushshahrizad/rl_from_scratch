@@ -1,14 +1,5 @@
-# I tried in this implementation to follow the PPO example of recomputing log probs.
-# But this seems to have broken the computational graph in a way I don't understand.
-# I need to figure out what exactly the computational graph does. And why storing in 
-# a preconfigured tensor might be breaking it. For this implementation I used just an
-# array to store logprobs. It seems this must introduce inefficiencies. Additionally,
-# this algorithm needs plus 10k steps before it starts improving. Also, the loss goes
-# up, which indicates learning, as the log-prob seems to get multiplied by ever 
-# increasing retunrs.
-# TODO: Check what is happening to entropy
-# TODO: Investigate the graph issue
-
+# This implementation uses the TD error instead of G;
+# See the bare REINFORCE.py implementation for this
 
 import torch
 import numpy as np
@@ -35,19 +26,30 @@ class Agent(nn.Module):
     def __init__(self):
         super().__init__()
         self.linear_relu_stack = nn.Sequential(
-                nn.Linear(4, 128),
-                nn.ReLU(),
-                nn.Linear(128, 128),
-                nn.ReLU(),
-                nn.Linear(128, 2)
-                ) 
+            nn.Linear(4, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 2)
+            ) 
 
+        self.critic = nn.Sequential(
+            nn.Linear(4, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)
+            ) 
 
     def forward(self, state):
         logits = self.linear_relu_stack(state)
         probs = Categorical(logits=logits) 
         action = probs.sample() 
         return probs.log_prob(action), action 
+    
+    def value(self, state):
+        return self.critic(state)
+
 
 def make_env():
     def thunk():
@@ -114,22 +116,27 @@ if __name__ == "__main__":
         #######    TRAINING     #######
         #                             #
         ###############################
-        loss = torch.zeros(BATCH_SIZE).to(device) 
-        discounted_return = torch.zeros(BATCH_SIZE).to(device)
+        policy_loss = torch.zeros(BATCH_SIZE).to(device) 
+        value_loss = torch.zeros(BATCH_SIZE).to(device)
+        value_next_state = torch.zeros(BATCH_SIZE).to(device)
 
         for step in reversed(range(MAX_STEP)):
-            discounted_return = rewards[step] + GAMMA * discounted_return * (1 - dones[step])
-            # state_at_this_step = obs[step]
-            # recomputed_log, _ = agent(state_at_this_step)
-            # loss += -recomputed_log * discounted_return
-            loss += -logprobs[step] * discounted_return
+            value_state = agent.value(obs[step])
+            td_error = rewards[step] - value_state + GAMMA * value_next_state * (1 - dones[step])
+            policy_loss += -logprobs[step] * td_error
+            value_loss += 0.5 * ((rewards[step] - value_state)**2)           # Uses a squared sum per envrionment error - is this okay?
+            value_next_state = value_state
+
         optimizer.zero_grad()
-        loss = loss.mean()
+        policy_loss = policy_loss.mean()
+        value_loss = value_loss.mean()
+        loss = policy_loss + value_loss             # Uses combined loss - is this smart?
         loss.backward()
         optimizer.step()
 
         # Log loss
-        writer.add_scalar("losses/policy_loss", loss.item(), global_step)
+        writer.add_scalar("losses/policy_loss", policy_loss.item(), global_step)
+        writer.add_scalar("losses/value_loss", value_loss.item(), global_step)
         logprobs = []
 
     envs.close()
