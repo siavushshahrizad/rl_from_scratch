@@ -8,6 +8,17 @@
 # increasing retunrs.
 # TODO: Check what is happening to entropy
 # TODO: Investigate the graph issue
+#
+# After doing some reading I now found I have learned a few things, e.g. actor
+# critic needs to be set up in particular ways to succeed, e.g update after each
+# episode. For the future the interesting things to do to get an understanding of the
+# two methods here would be (a) run sum vs mean of loss, (b) use normalisation of the 
+# return to see how affect training, (c) use one envrionment only to see what happens to
+# convergence, (d) train after a single episode to see re convergence.
+# 
+# Another thing that should be tried is ablation studies - what happens if we use 
+# multiple epochs on the same data with reinforce. 'there doesn't seem to be a big reaosn
+# why ppo's clipping protects against anything. <D-F3>:
 
 
 import torch
@@ -124,6 +135,7 @@ if __name__ == "__main__":
             # loss += -recomputed_log * discounted_return
             loss += -logprobs[step] * discounted_return
         optimizer.zero_grad()
+# to look at the performance of one head or several heads. 
         loss = loss.mean()
         loss.backward()
         optimizer.step()

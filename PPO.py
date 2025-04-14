@@ -18,6 +18,8 @@ ROLLOUTS = 30
 GAMMA = 0.99
 ALPHA = 1e-3
 VL_COEF = 0.5
+NUM_EPOCHS = 2
+LAMBDA = 0.97
 
 # This is a Mac implementation
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -73,11 +75,11 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(agent.parameters(), lr=ALPHA)    
 
     # Storage
-    obs = torch.zeros((MAX_STEP, BATCH_SIZE) + envs.single_observation_space.shape).to(device)
-    dones = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)      # Should this even be set up here?
-    rewards = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)
-    # logprobs = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)   # Not needed for REINFORCE, only PPO
-    logprobs = []
+    obs = torch.zeros((MAX_STEP, BATCH_SIZE) + envs.single_observation_space.shape).to(device)   
+    dones = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)      
+    rewards = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)   
+    logprobs = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)   
+    values = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)
 
     for rollout in range(ROLLOUTS):
         
@@ -95,10 +97,10 @@ if __name__ == "__main__":
             obs[step] = next_obs
             dones[step] = next_done
 
-            # with torch.no_grad():
             logprob, action = agent(next_obs)
-            # logprobs[step] = logprob                            # Only for PPO; breaks computational graph
-            logprobs.append(logprob)
+            value = agent.value(obs[step]).flatten()              
+            values[step] = value
+            logprobs[step] = logprob     
 
             action_numpy = action.cpu().numpy()
             next_obs, reward, terminated, truncated, info = envs.step(action_numpy)
@@ -116,24 +118,47 @@ if __name__ == "__main__":
         #######    TRAINING     #######
         #                             #
         ###############################
-        policy_loss = torch.zeros(BATCH_SIZE).to(device) 
-        value_loss = torch.zeros(BATCH_SIZE).to(device)
-        value_next_state = torch.zeros(BATCH_SIZE).to(device)
+        value_next_state = agent.value(next_obs).flatten()          # ! Needed as next state my be contuination or reset as we have arbitraty cut of of trajectories
+        advantages = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)         # Why are we storin?
+        generalized_advantage_estimate = 0
 
-        for step in reversed(range(MAX_STEP)):
-            value_state = agent.value(obs[step]).flatten()
-            td_target = rewards[step] + GAMMA * value_next_state * (1 - dones[step]) 
-            td_error = td_target - value_state      # I initially used only the reward here, not td_target, which meant the model didn't learn anything; it got worse
-            policy_loss += -logprobs[step] * td_error.detach()
-            value_loss += 0.5 * (td_target - value_state)**2        
-            value_next_state = value_state
+        ####### !!!!  I made serveral errors calculating this
+        # e.g. I assumed that the value of the next step is 
+        # always 0 in the REINFORCE and actor-critic versions, 
+        # I used the mask for the current step tjo multiply by the
+        # value of the next step.
+        for step in reversed(range(MAX_STEP)):          # Can be outside epoch loop as stuff does not need to be recomputed
+            if step == MAX_STEP - 1:
+                value_next_state = value_next_state
+                next_terminal = 1 - next_done
+            else:
+                value_next_state = values[step+1]
+                next_terminal = 1 - dones[step+1]
 
-        optimizer.zero_grad()
-        policy_loss = policy_loss.mean()
-        value_loss = value_loss.mean()
-        loss = policy_loss + VL_COEF * value_loss             # Uses combined loss - is this smart? Why is this okay?
-        loss.backward()
-        optimizer.step()
+            td_target = rewards[step] + GAMMA * value_next_state * next_terminal 
+            td_error = td_target - value_state      ##### !!!!!!!! I initially used only the reward here, not td_target, which meant the model didn't learn anything; it got worse
+            generalized_advantage_estimate = td_error + GAMMA * LAMBDA * generalized_advantage_estimate * next_terminal
+            advantages[step] = generalized_advantage_estimate 
+
+        for epoch in NUM_EPOCHS:
+                                    policy_loss += -logprobs[step] * td_error.detach()
+                value_loss += 0.5 * (td_target - value_state)**2        
+                value_next_state = value_state
+
+
+
+
+
+
+
+            policy_loss = torch.zeros(BATCH_SIZE).to(device) 
+            value_loss = torch.zeros(BATCH_SIZE).to(device)
+            optimizer.zero_grad()
+            policy_loss = policy_loss.mean()
+            value_loss = value_loss.mean()
+            loss = policy_loss + VL_COEF * value_loss             # Uses combined loss - is this smart? Why is this okay?
+            loss.backward()
+            optimizer.step()
 
         # Log loss
         writer.add_scalar("losses/policy_loss", policy_loss.item(), global_step)
