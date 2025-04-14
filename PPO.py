@@ -13,13 +13,16 @@ from torch.distributions import Categorical
 
 # Hyperparameters
 MAX_STEP = 500
-BATCH_SIZE = 4
+BATCH_SIZE = 4                  # A misnomer; should be rather called num_envs
 ROLLOUTS = 30
 GAMMA = 0.99
 ALPHA = 1e-3
 VL_COEF = 0.5
 NUM_EPOCHS = 2
 LAMBDA = 0.97
+NUM_TRANSITIONS = int(BATCH_SIZE * MAX_STEP)
+NUM_MINI_BATCHES = 4
+MINI_BATCH_SIZE = int(NUM_TRANSITIONS // NUM_MINI_BATCHES)
 
 # This is a Mac implementation
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -43,7 +46,7 @@ class Agent(nn.Module):
             nn.Linear(128, 1)
             ) 
 
-    def forward(self, state):
+    def forward(self, state):                   # TODO: Needs to consume a previous action
         logits = self.linear_relu_stack(state)
         probs = Categorical(logits=logits) 
         action = probs.sample() 
@@ -139,8 +142,33 @@ if __name__ == "__main__":
             td_error = td_target - value_state      ##### !!!!!!!! I initially used only the reward here, not td_target, which meant the model didn't learn anything; it got worse
             generalized_advantage_estimate = td_error + GAMMA * LAMBDA * generalized_advantage_estimate * next_terminal
             advantages[step] = generalized_advantage_estimate 
+            returns = advantages + values           # Later used for calculating value loss; this deviates from the original PPO implementation
+
+        # We now flatten the tensors to make mini-batching possible/easier
+        # This means the temporal association between types state,action, etc
+        # is destroyed. It doesn't seem to be needced.
+        # The argument is that minibatching allows multiple updates to the thetas
+        # per epoch - so is finer updating - also the mixing of experiences from differnt 
+        # environments is allegedly helpful, plus easier to process all data.
+
+        # The main poing what we can deanchor tuples seems to be that the temporal 
+        # order is already baked in via the advantage calculation.  
+        # BUT THESE THNINGS ARE ABSTRACT AND I NEED TO BETTER UNDERSTAND THEM
+        batch_indices = np.arrange(NUM_TRANSITIONS)
 
         for epoch in NUM_EPOCHS:
+            np.random.shuffle(batch_indices)
+            
+            for start in range(0, NUM_TRANSITIONS, MINI_BATCH_SIZE):
+                end = start + MINI_BATCH_SIZE
+                mini_batch_indices = batch_indices[start:end]       # Getch array of randomised batch indices
+
+                new_logprobs, _ = agent(obs_flattened[mini_batch_indices])  # TODO: Needs to consume a previous action
+                new_values = agent.value(obs_[mini_batch_indices]) 
+
+            
+                       
+            
                                     policy_loss += -logprobs[step] * td_error.detach()
                 value_loss += 0.5 * (td_target - value_state)**2        
                 value_next_state = value_state
