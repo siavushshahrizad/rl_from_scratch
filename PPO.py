@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import gymnasium as gym
 import matplotlib.pyplot as plt
-import time
+from datetime import datetime
 from torch import nn
 from torch import optim
 from torch.utils.tensorboard import SummaryWriter
@@ -50,7 +50,7 @@ class Agent(nn.Module):
     def forward(self, state, action=None):                   
         logits = self.linear_relu_stack(state)
         probs = Categorical(logits=logits) 
-        if not action:
+        if action is None:
             action = probs.sample() 
         return probs.log_prob(action), action 
     
@@ -68,7 +68,7 @@ def make_env():
 if __name__ == "__main__":
 
     # Track outcomes with Tensorboard
-    timestamp = time.time()
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") 
     writer = SummaryWriter(f"runs/cartpole_{timestamp}")            # Needed for loging reward per episodce in Tensorboard
     global_step = 0
 
@@ -118,16 +118,16 @@ if __name__ == "__main__":
             next_obs = torch.tensor(next_obs, dtype=torch.float32).to(device)
 
             if "episode" in info:                           # The info object seems unique to each in environment and seems to differ between people's code. So need to check if this works
-                returns = info["episode"]["r"] 
-                for env_idx, env_return in enumerate(returns):
-                    writer.add_scalar(f"charts/env_{env_idx}/episodic_return", env_return, global_step)         # This logs to Tensorboard; need to run server; and visit localhost to see results
+                rewards = info["episode"]["r"] 
+                for env_idx, env_reward in enumerate(rewards):
+                    writer.add_scalar(f"charts/env_{env_idx}/episodic_reward", env_reward, global_step)         # This logs to Tensorboard; need to run server; and visit localhost to see results
         
         #######    TRAINING     #######
         #                             #
         ###############################
         value_next_state = agent.value(next_obs).flatten()          # ! Needed as next state my be contuination or reset as we have arbitraty cut of of trajectories
         advantages = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)         # Why are we storin?
-        generalized_advantage_estimate = 0
+        generalized_advantage_estimate = 0          # Starts as a scalar, but becomes tensor immediately; would have been cleaner to use tensor from start
 
         ####### !!!!  I made serveral errors calculating this
         # e.g. I assumed that the value of the next step is 
@@ -143,7 +143,11 @@ if __name__ == "__main__":
                 next_terminal = 1 - dones[step+1]
 
             td_target = rewards[step] + GAMMA * value_next_state * next_terminal 
-            td_error = td_target - value_state      ##### !!!!!!!! I initially used only the reward here, not td_target, which meant the model didn't learn anything; it got worse
+            # I also made a second mistake; calculating td_error below but it got fixed 
+            # via intuition and reading the code: I had used the value of next state
+            # instead of the current state for substraction - means deep familiarity with
+            # formulas is important
+            td_error = td_target - values[step] #### !!!!!!!! I initially used only the reward here, not td_target, which meant the model didn't learn anything; it got worse
             generalized_advantage_estimate = td_error + GAMMA * LAMBDA * generalized_advantage_estimate * next_terminal
             advantages[step] = generalized_advantage_estimate 
             returns = advantages + values           # Later used for calculating value loss; this deviates from the original PPO implementation
@@ -165,9 +169,9 @@ if __name__ == "__main__":
         # The main poing what we can deanchor tuples seems to be that the temporal 
         # order is already baked in via the advantage calculation.  
         # BUT THESE THNINGS ARE ABSTRACT AND I NEED TO BETTER UNDERSTAND THEM
-        batch_indices = np.arrange(NUM_TRANSITIONS)
+        batch_indices = np.arange(NUM_TRANSITIONS)
 
-        for epoch in NUM_EPOCHS:
+        for epoch in range(NUM_EPOCHS):
             np.random.shuffle(batch_indices)
             
             for start in range(0, NUM_TRANSITIONS, MINI_BATCH_SIZE):
@@ -197,7 +201,7 @@ if __name__ == "__main__":
         # Log loss
         writer.add_scalar("losses/policy_loss", policy_loss.item(), global_step)
         writer.add_scalar("losses/value_loss", value_loss.item(), global_step)
-        logprobs = []
+        writer.add_scalar("losses/total_loss", loss.item(), global_step)
 
     envs.close()
     writer.close()
