@@ -118,8 +118,8 @@ if __name__ == "__main__":
             next_obs = torch.tensor(next_obs, dtype=torch.float32).to(device)
 
             if "episode" in info:                           # The info object seems unique to each in environment and seems to differ between people's code. So need to check if this works
-                rewards = info["episode"]["r"] 
-                for env_idx, env_reward in enumerate(rewards):
+                episode_rewards = info["episode"]["r"] 
+                for env_idx, env_reward in enumerate(episode_rewards):
                     writer.add_scalar(f"charts/env_{env_idx}/episodic_reward", env_reward, global_step)         # This logs to Tensorboard; need to run server; and visit localhost to see results
         
         #######    TRAINING     #######
@@ -150,7 +150,7 @@ if __name__ == "__main__":
             td_error = td_target - values[step] #### !!!!!!!! I initially used only the reward here, not td_target, which meant the model didn't learn anything; it got worse
             generalized_advantage_estimate = td_error + GAMMA * LAMBDA * generalized_advantage_estimate * next_terminal
             advantages[step] = generalized_advantage_estimate 
-            returns = advantages + values           # Later used for calculating value loss; this deviates from the original PPO implementation
+        returns = advantages + values           # Later used for calculating value loss; this deviates from the original PPO implementation; made error that it was inside loop
 
         # We now flatten the tensors to make mini-batching possible/easier
         # This means the temporal association between types state,action, etc
