@@ -23,6 +23,7 @@ LAMBDA = 0.97
 NUM_TRANSITIONS = int(BATCH_SIZE * MAX_STEP)
 NUM_MINI_BATCHES = 4
 MINI_BATCH_SIZE = int(NUM_TRANSITIONS // NUM_MINI_BATCHES)
+CLIP_COEF = 0.2
 
 # This is a Mac implementation
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -46,10 +47,11 @@ class Agent(nn.Module):
             nn.Linear(128, 1)
             ) 
 
-    def forward(self, state):                   # TODO: Needs to consume a previous action
+    def forward(self, state, action=None):                   
         logits = self.linear_relu_stack(state)
         probs = Categorical(logits=logits) 
-        action = probs.sample() 
+        if not action:
+            action = probs.sample() 
         return probs.log_prob(action), action 
     
     def value(self, state):
@@ -79,6 +81,7 @@ if __name__ == "__main__":
 
     # Storage
     obs = torch.zeros((MAX_STEP, BATCH_SIZE) + envs.single_observation_space.shape).to(device)   
+    actions = torch.zeros((MAX_STEP, BATCH_SIZE), dtype=torch.long).to(device)      # Store as long or else accidental conversion possible; float 32 default; is another action_space dimension neede?
     dones = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)      
     rewards = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)   
     logprobs = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)   
@@ -104,6 +107,7 @@ if __name__ == "__main__":
             value = agent.value(obs[step]).flatten()              
             values[step] = value
             logprobs[step] = logprob     
+            actions[step] = action                      # Needed later for recomputing probabilyt under new policy
 
             action_numpy = action.cpu().numpy()
             next_obs, reward, terminated, truncated, info = envs.step(action_numpy)
@@ -151,6 +155,13 @@ if __name__ == "__main__":
         # per epoch - so is finer updating - also the mixing of experiences from differnt 
         # environments is allegedly helpful, plus easier to process all data.
 
+        # TODO: Flatten tensors
+        obs_flattened = obs.reshape((-1,) + envs.single_observation_space.shape)            # We are doing tuple math here; hence (-1, ); and 2 dimension needed to retain meaningful datat
+        logprobs_flattened = logprobs.reshape(-1)
+        actions_flattened = actions.reshape(-1)
+        advantages_flattened = advantages.reshape(-1)
+        returns_flattened = returns.reshape(-1)
+
         # The main poing what we can deanchor tuples seems to be that the temporal 
         # order is already baked in via the advantage calculation.  
         # BUT THESE THNINGS ARE ABSTRACT AND I NEED TO BETTER UNDERSTAND THEM
@@ -163,30 +174,25 @@ if __name__ == "__main__":
                 end = start + MINI_BATCH_SIZE
                 mini_batch_indices = batch_indices[start:end]       # Getch array of randomised batch indices
 
-                new_logprobs, _ = agent(obs_flattened[mini_batch_indices])  # TODO: Needs to consume a previous action
-                new_values = agent.value(obs_[mini_batch_indices]) 
+                new_logprobs, _ = agent(obs_flattened[mini_batch_indices], actions_flattened[mini_batch_indices])  
+                new_values = agent.value(obs_flattened[mini_batch_indices]) 
+                logratio = new_logprobs - logprobs_flattened[mini_batch_indices]
+                ratio = logratio.exp()              # log(a/b) = log(a) - log(b); exponentiation inverse of log
 
-            
-                       
-            
-                                    policy_loss += -logprobs[step] * td_error.detach()
-                value_loss += 0.5 * (td_target - value_state)**2        
-                value_next_state = value_state
+                ### Loss calculations ###
+                mini_batch_advantages = advantages_flattened[mini_batch_indices]
+                unclipped_policy_loss = -ratio * mini_batch_advantages
+                clipped_policy_loss = -torch.clamp(ratio, 1 - CLIP_COEF, 1 + CLIP_COEF) * mini_batch_advantages
+                policy_loss = torch.max(unclipped_policy_loss, clipped_policy_loss).mean()          # Using negative losses given what pytorch expects; taking mean as fomrula asks for expectation
 
+                new_values = new_values.flatten()               # Needed as what comes out of critic has shape (x, 1)?
+                value_loss = 0.5 * ((new_values - returns_flattened[mini_batch_indices])**2).mean()     # Taking expectation;
+                loss = policy_loss + VL_COEF * value_loss             # Uses combined loss - is this smart? Why is this okay?
 
-
-
-
-
-
-            policy_loss = torch.zeros(BATCH_SIZE).to(device) 
-            value_loss = torch.zeros(BATCH_SIZE).to(device)
-            optimizer.zero_grad()
-            policy_loss = policy_loss.mean()
-            value_loss = value_loss.mean()
-            loss = policy_loss + VL_COEF * value_loss             # Uses combined loss - is this smart? Why is this okay?
-            loss.backward()
-            optimizer.step()
+                # Backpropagation
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
         # Log loss
         writer.add_scalar("losses/policy_loss", policy_loss.item(), global_step)
