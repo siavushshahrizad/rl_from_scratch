@@ -1,0 +1,49 @@
+ ~/Doc/g/rl_from_scratch │ main !1 ?2  py PPO.py                          ✔ │ rl_from_scratch Py │ 17:24:24 
+/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/autograd/graph.py:823:
+ UserWarning: Error detected in LinearBackward0. Traceback of forward call that caused the error:
+  File "/Users/siasha/Documents/github/rl_from_scratch/PPO.py", line 108, in <module>
+    value = agent.value(obs[step]).flatten()
+  File "/Users/siasha/Documents/github/rl_from_scratch/PPO.py", line 58, in value
+    return self.critic(state)
+  File "/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/nn/modules/mod
+ule.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/nn/modules/mod
+ule.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/nn/modules/con
+tainer.py", line 250, in forward
+    input = module(input)
+  File "/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/nn/modules/mod
+ule.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/nn/modules/mod
+ule.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/nn/modules/lin
+ear.py", line 125, in forward
+    return F.linear(input, self.weight, self.bias)
+ (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/torch/csrc/autograd/python_anomaly_mode.
+cpp:127.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+Traceback (most recent call last):
+  File "/Users/siasha/Documents/github/rl_from_scratch/PPO.py", line 199, in <module>
+    loss.backward()
+  File "/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/_tensor.py", l
+ine 626, in backward
+    torch.autograd.backward(
+  File "/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/autograd/__ini
+t__.py", line 347, in backward
+    _engine_run_backward(
+  File "/Users/siasha/Documents/github/rl_from_scratch/.venv/lib/python3.9/site-packages/torch/autograd/graph
+.py", line 823, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation:
+ [MPSFloatType [4, 4]] is at version 500; expected version 499 instead. Hint: the backtrace further above sho
+ws the operation that failed to compute its gradient. The variable in question was changed in there or anywhe
+re later. Good luck!
+ ~/Doc/g/rl_from_scratch │ main !1 ?2                              1 х │ 6s │ rl_from_scratch Py │ 17:24:32 
+
+https://pytorch.org/tutorials/beginner/basics/autogradqs_tutorial.html?utm_source=chatgpt.com
+
+https://pytorch.org/docs/stable/notes/autograd.html

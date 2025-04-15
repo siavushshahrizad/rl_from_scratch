@@ -66,6 +66,7 @@ def make_env():
     return thunk
 
 if __name__ == "__main__":
+    torch.autograd.set_detect_anomaly(True)         # For debugging gradient computations
 
     # Track outcomes with Tensorboard
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") 
@@ -136,7 +137,7 @@ if __name__ == "__main__":
         # value of the next step.
         for step in reversed(range(MAX_STEP)):          # Can be outside epoch loop as stuff does not need to be recomputed
             if step == MAX_STEP - 1:
-                value_next_state = value_next_state
+                value_next_state = value_next_state         # ! Does this cause computation graph errors?
                 next_terminal = 1 - next_done
             else:
                 value_next_state = values[step+1]
