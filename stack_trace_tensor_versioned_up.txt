@@ -44,6 +44,8 @@ ws the operation that failed to compute its gradient. The variable in question w
 re later. Good luck!
  ~/Doc/g/rl_from_scratch │ main !1 ?2                              1 х │ 6s │ rl_from_scratch Py │ 17:24:32 
 
-https://pytorch.org/tutorials/beginner/basics/autogradqs_tutorial.html?utm_source=chatgpt.com
+ https://discuss.pytorch.org/t/runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modified-by-an-inplace-operation-torch-floattensor-64-1-which-is-output-0-of-asstridedbackward0-is-at-version-3-expected-version-2-instead-hint-the-backtrace-further-a/171826/7
 
-https://pytorch.org/docs/stable/notes/autograd.html
+ https://discuss.pytorch.org/t/when-inplace-operation-are-allowed-and-when-not/169583/3
+
+

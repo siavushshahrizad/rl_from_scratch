@@ -1,4 +1,21 @@
-# Add comments later ...
+# One of the big problems when implementing this algorithm was
+# that although I had read every line and then added breakpoints
+# , the implementation failed in the training phase. There was 
+# something wrong with the brackpopagation. Again, it seems to me 
+# that a lot of problems are backpropagation problems. It isn't
+# easy to trace these, but there was something wrong with the state
+# value tensor. It seemed it was being versioned up - later it occured
+# to me that it shouldn't be versioned up at all probably. I guess
+# one problem was that assignment via indexing is an in-place
+# operation, and pytorch hates that. But then this seemsed like a 
+# second oder problem, I think the only things that need to be in
+# the compurational graph are what strictly speaking needs to be in there
+# for backprop. This is a double-edged sword. Cut too much and it fails,
+# cut too little and it might fail. I have some level of confidence
+# that the both the action, and state values, as well as the 
+# advantage calculations should not be part of the computational graph. 
+# However, I need to dig deeper why exactly. Currenlty, I am developing
+# the beginnings of intuition but not deep understanding.
 
 import torch
 import numpy as np
@@ -104,8 +121,9 @@ if __name__ == "__main__":
             obs[step] = next_obs
             dones[step] = next_done
 
-            logprob, action = agent(next_obs)
-            value = agent.value(obs[step]).flatten()              
+            with torch.no_grad():                       # ! This seems incredibly important as it will cause gradient problems in backprop
+                logprob, action = agent(next_obs)       # ! if added to computational graph.
+                value = agent.value(obs[step]).flatten()              
             values[step] = value
             logprobs[step] = logprob     
             actions[step] = action                      # Needed later for recomputing probabilyt under new policy
@@ -126,32 +144,33 @@ if __name__ == "__main__":
         #######    TRAINING     #######
         #                             #
         ###############################
-        value_next_state = agent.value(next_obs).flatten()          # ! Needed as next state my be contuination or reset as we have arbitraty cut of of trajectories
-        advantages = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)         # Why are we storin?
-        generalized_advantage_estimate = 0          # Starts as a scalar, but becomes tensor immediately; would have been cleaner to use tensor from start
+        with torch.no_grad():       # ! Important or probably backprop error
+            value_next_state = agent.value(next_obs).flatten()          # ! Needed as next state my be contuination or reset as we have arbitraty cut of of trajectories
+            advantages = torch.zeros((MAX_STEP, BATCH_SIZE)).to(device)         # Why are we storin?
+            generalized_advantage_estimate = 0          # Starts as a scalar, but becomes tensor immediately; would have been cleaner to use tensor from start
 
-        ####### !!!!  I made serveral errors calculating this
-        # e.g. I assumed that the value of the next step is 
-        # always 0 in the REINFORCE and actor-critic versions, 
-        # I used the mask for the current step tjo multiply by the
-        # value of the next step.
-        for step in reversed(range(MAX_STEP)):          # Can be outside epoch loop as stuff does not need to be recomputed
-            if step == MAX_STEP - 1:
-                value_next_state = value_next_state         # ! Does this cause computation graph errors?
-                next_terminal = 1 - next_done
-            else:
-                value_next_state = values[step+1]
-                next_terminal = 1 - dones[step+1]
+            ####### !!!!  I made serveral errors calculating this
+            # e.g. I assumed that the value of the next step is 
+            # always 0 in the REINFORCE and actor-critic versions, 
+            # I used the mask for the current step tjo multiply by the
+            # value of the next step.
+            for step in reversed(range(MAX_STEP)):          # Can be outside epoch loop as stuff does not need to be recomputed
+                if step == MAX_STEP - 1:
+                    value_next_state = value_next_state         # ! Does this cause computation graph errors?
+                    next_terminal = 1 - next_done
+                else:
+                    value_next_state = values[step+1]
+                    next_terminal = 1 - dones[step+1]
 
-            td_target = rewards[step] + GAMMA * value_next_state * next_terminal 
-            # I also made a second mistake; calculating td_error below but it got fixed 
-            # via intuition and reading the code: I had used the value of next state
-            # instead of the current state for substraction - means deep familiarity with
-            # formulas is important
-            td_error = td_target - values[step] #### !!!!!!!! I initially used only the reward here, not td_target, which meant the model didn't learn anything; it got worse
-            generalized_advantage_estimate = td_error + GAMMA * LAMBDA * generalized_advantage_estimate * next_terminal
-            advantages[step] = generalized_advantage_estimate 
-        returns = advantages + values           # Later used for calculating value loss; this deviates from the original PPO implementation; made error that it was inside loop
+                td_target = rewards[step] + GAMMA * value_next_state * next_terminal 
+                # I also made a second mistake; calculating td_error below but it got fixed 
+                # via intuition and reading the code: I had used the value of next state
+                # instead of the current state for substraction - means deep familiarity with
+                # formulas is important
+                td_error = td_target - values[step] #### !!!!!!!! I initially used only the reward here, not td_target, which meant the model didn't learn anything; it got worse
+                generalized_advantage_estimate = td_error + GAMMA * LAMBDA * generalized_advantage_estimate * next_terminal
+                advantages[step] = generalized_advantage_estimate 
+            returns = advantages + values           # Later used for calculating value loss; this deviates from the original PPO implementation; made error that it was inside loop
 
         # We now flatten the tensors to make mini-batching possible/easier
         # This means the temporal association between types state,action, etc
